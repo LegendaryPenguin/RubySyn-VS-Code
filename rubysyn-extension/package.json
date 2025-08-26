@@ -14,10 +14,18 @@
   "contributes": {
     "commands": [
       {
-        "command": "rubysyn-extension.helloWorld",
-        "title": "Hello World"
+        "command": "rubysyn-extension.codeGen",
+        "title": "rbysn codegen"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "rubysyn-extension.codeGen",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

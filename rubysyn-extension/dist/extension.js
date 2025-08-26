@@ -35,11 +35,76 @@ __export(extension_exports, {
 });
 module.exports = __toCommonJS(extension_exports);
 var vscode = __toESM(require("vscode"));
+var fs = __toESM(require("fs"));
+var path = __toESM(require("path"));
+function ensureUriFromContext(uri) {
+  if (uri) return uri;
+  const ed = vscode.window.activeTextEditor;
+  return ed?.document?.uri;
+}
 function activate(context) {
-  console.log('Congratulations, your extension "rubysyn-extension" is now active!');
-  const disposable = vscode.commands.registerCommand("rubysyn-extension.helloWorld", () => {
-    vscode.window.showInformationMessage("Hello World from RubySyn_Extension!");
-  });
+  const disposable = vscode.commands.registerCommand(
+    "rubysyn-extension.codeGen",
+    async (clickedUri) => {
+      try {
+        const fileUri = ensureUriFromContext(clickedUri);
+        if (!fileUri) {
+          vscode.window.showErrorMessage("No file selected or active.");
+          return;
+        }
+        if (fileUri.scheme !== "file") {
+          vscode.window.showErrorMessage("Only local files are supported.");
+          return;
+        }
+        const srcPath = fileUri.fsPath;
+        if (!fs.existsSync(srcPath) || !fs.statSync(srcPath).isFile()) {
+          vscode.window.showErrorMessage("Selected item is not a file.");
+          return;
+        }
+        const raw = fs.readFileSync(srcPath, "utf8");
+        const b64 = Buffer.from(raw, "utf8").toString("base64");
+        const base = path.parse(srcPath).base.replace(/\s+/g, "_");
+        const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").replace("T", "_").replace("Z", "");
+        const baseWithTs = (base.endsWith(".rb") ? base.slice(0, -3) : base) + `_${ts}.rb`;
+        const wslRepoRoot = "/home/nisch/rbsyn";
+        const wslRelDir = "tmp_bench";
+        const wslRelPath = `${wslRelDir}/${baseWithTs}`;
+        const wslAbsPath = `${wslRepoRoot}/${wslRelPath}`;
+        const term = vscode.window.createTerminal({
+          name: "RbSyn (WSL)",
+          shellPath: "wsl.exe"
+        });
+        term.show(true);
+        const wslScript = `
+bash -lc '
+  set -euo pipefail
+  echo "[RbSyn] Writing input to ${wslAbsPath}"
+  mkdir -p "${wslRepoRoot}/${wslRelDir}"
+
+  # stash base64 temporarily
+  cat > /tmp/rbsyn_input.b64 << "EOF_RBSYN"
+${b64}
+EOF_RBSYN
+
+  # decode into the repo
+  base64 -d /tmp/rbsyn_input.b64 > "${wslAbsPath}"
+  rm -f /tmp/rbsyn_input.b64
+
+  echo "[RbSyn] Running bench on ${wslRelPath}"
+  cd "${wslRepoRoot}"
+  CONSOLE_LOG=1 bundle exec rake bench TEST="${wslRelPath}"
+'`.trim();
+        term.sendText(wslScript);
+        vscode.window.showInformationMessage(
+          `RbSyn started for ${path.basename(srcPath)} \u2192 ${wslRelPath}`
+        );
+      } catch (e) {
+        vscode.window.showErrorMessage(
+          `RbSyn failed to start: ${e?.message ?? e}`
+        );
+      }
+    }
+  );
   context.subscriptions.push(disposable);
 }
 function deactivate() {
